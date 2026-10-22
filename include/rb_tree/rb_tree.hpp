@@ -6,12 +6,9 @@
 template <typename Key>
 class RBTree {
  public:
-  RBTree() : nil_(new BaseNode()), root_(nil_) {}
+  RBTree() : nil_(), root_(&nil_) {}
 
-  ~RBTree() {
-    destroy(root_);
-    delete nil_;
-  }
+  ~RBTree() { destroy(root_); }
 
   RBTree(const RBTree&) = delete;
   RBTree& operator=(const RBTree&) = delete;
@@ -20,10 +17,10 @@ class RBTree {
   RBTree& operator=(RBTree&&) = delete;
 
   void insert(const Key& key) {
-    BaseNode* parent_node = nil_;
+    BaseNode* parent_node = &nil_;
     BaseNode* current_node = root_;
 
-    while (current_node != nil_) {
+    while (current_node != &nil_) {
       parent_node = current_node;
       Node* data_node = as_node(current_node);
 
@@ -38,10 +35,10 @@ class RBTree {
       }
     }
 
-    Node* new_node = new Node(key, nil_);
+    Node* new_node = new Node(key, &nil_);
     new_node->parent = parent_node;
 
-    if (parent_node == nil_) {
+    if (parent_node == &nil_) {
       root_ = new_node;
     } else if (key < as_node(parent_node)->key) {
       parent_node->left = new_node;
@@ -56,7 +53,7 @@ class RBTree {
   bool erase(const Key& key) {
     BaseNode* target_node = find_node(key);
 
-    if (target_node == nil_) {
+    if (target_node == &nil_) {
       return false;
     }
 
@@ -70,16 +67,16 @@ class RBTree {
 
     BaseNode* successor_node = target_node;
     Color original_color = successor_node->color;
-    BaseNode* replacement_node = nil_;
+    BaseNode* replacement_node = &nil_;
 
-    if (target_node->left == nil_) {
+    if (target_node->left == &nil_) {
       replacement_node = target_node->right;
 
       BaseNode* old_parent = target_node->parent;
 
       transplant(target_node, target_node->right);
       update_up(old_parent);
-    } else if (target_node->right == nil_) {
+    } else if (target_node->right == &nil_) {
       replacement_node = target_node->left;
 
       BaseNode* old_parent = target_node->parent;
@@ -119,17 +116,17 @@ class RBTree {
       delete_fixup(replacement_node);
     }
 
-    nil_->color = Color::Black;
+    nil_.color = Color::Black;
 
     return true;
   }
 
   std::optional<Key> lower_bound(const Key& key) const {
-    BaseNode* current_node = root_;
-    BaseNode* answer_node = nil_;
+    const BaseNode* current_node = root_;
+    const BaseNode* answer_node = &nil_;
 
-    while (current_node != nil_) {
-      Node* data_node = as_node(current_node);
+    while (current_node != &nil_) {
+      const Node* data_node = as_node(current_node);
 
       if (!(data_node->key < key)) {
         answer_node = current_node;
@@ -139,7 +136,7 @@ class RBTree {
       }
     }
 
-    if (answer_node == nil_) {
+    if (answer_node == &nil_) {
       return std::nullopt;
     }
 
@@ -151,9 +148,9 @@ class RBTree {
       return std::nullopt;
     }
 
-    BaseNode* current_node = root_;
+    const BaseNode* current_node = root_;
 
-    while (current_node != nil_) {
+    while (current_node != &nil_) {
       const std::size_t left_size = current_node->left->subtree_size;
 
       const std::size_t key_count = as_node(current_node)->key_cnt;
@@ -172,9 +169,9 @@ class RBTree {
   }
 
   std::size_t count(const Key& key) const {
-    BaseNode* found_node = find_node(key);
+    const BaseNode* found_node = find_node(key);
 
-    if (found_node == nil_) {
+    if (found_node == &nil_) {
       return 0;
     }
 
@@ -183,10 +180,10 @@ class RBTree {
 
   std::size_t count_less_than(const Key& key) const {
     std::size_t less_count = 0;
-    BaseNode* current_node = root_;
+    const BaseNode* current_node = root_;
 
-    while (current_node != nil_) {
-      Node* data_node = as_node(current_node);
+    while (current_node != &nil_) {
+      const Node* data_node = as_node(current_node);
 
       if (data_node->key < key) {
         less_count += current_node->left->subtree_size;
@@ -203,17 +200,17 @@ class RBTree {
 
   std::size_t size() const { return root_->subtree_size; }
 
-  bool empty() const { return root_ == nil_; }
+  bool empty() const { return root_ == &nil_; }
 
   void clear() {
     destroy(root_);
-    root_ = nil_;
+    root_ = &nil_;
 
-    nil_->left = nil_;
-    nil_->right = nil_;
-    nil_->parent = nil_;
-    nil_->color = Color::Black;
-    nil_->subtree_size = 0;
+    nil_.left = &nil_;
+    nil_.right = &nil_;
+    nil_.parent = &nil_;
+    nil_.color = Color::Black;
+    nil_.subtree_size = 0;
   }
 
  private:
@@ -230,17 +227,19 @@ class RBTree {
           color(Color::Black),
           subtree_size(0) {}
 
-    BaseNode(BaseNode* nil, Color color, std::size_t subtree_size)
+    BaseNode(BaseNode* nil, Color node_color, std::size_t node_size)
         : left(nil),
           right(nil),
           parent(nil),
-          color(color),
-          subtree_size(subtree_size) {}
+          color(node_color),
+          subtree_size(node_size) {}
 
     BaseNode* left;
     BaseNode* right;
     BaseNode* parent;
+
     Color color;
+
     std::size_t subtree_size;
   };
 
@@ -249,11 +248,19 @@ class RBTree {
         : BaseNode(nil, Color::Red, 1), key(key), key_cnt(1) {}
 
     Key key;
+
     std::size_t key_cnt;
   };
 
+  BaseNode nil_;
+  BaseNode* root_;
+
   static Node* as_node(BaseNode* base_node) {
     return static_cast<Node*>(base_node);
+  }
+
+  static const Node* as_node(const BaseNode* base_node) {
+    return static_cast<const Node*>(base_node);
   }
 
   static bool is_red(const BaseNode* base_node) {
@@ -265,7 +272,7 @@ class RBTree {
   }
 
   void recalc(BaseNode* base_node) {
-    if (base_node == nil_) {
+    if (base_node == &nil_) {
       return;
     }
 
@@ -275,7 +282,7 @@ class RBTree {
   }
 
   void update_up(BaseNode* base_node) {
-    while (base_node != nil_) {
+    while (base_node != &nil_) {
       recalc(base_node);
       base_node = base_node->parent;
     }
@@ -286,13 +293,13 @@ class RBTree {
 
     pivot_node->right = raised_node->left;
 
-    if (raised_node->left != nil_) {
+    if (raised_node->left != &nil_) {
       raised_node->left->parent = pivot_node;
     }
 
     raised_node->parent = pivot_node->parent;
 
-    if (pivot_node->parent == nil_) {
+    if (pivot_node->parent == &nil_) {
       root_ = raised_node;
     } else if (pivot_node == pivot_node->parent->left) {
       pivot_node->parent->left = raised_node;
@@ -312,13 +319,13 @@ class RBTree {
 
     pivot_node->left = raised_node->right;
 
-    if (raised_node->right != nil_) {
+    if (raised_node->right != &nil_) {
       raised_node->right->parent = pivot_node;
     }
 
     raised_node->parent = pivot_node->parent;
 
-    if (pivot_node->parent == nil_) {
+    if (pivot_node->parent == &nil_) {
       root_ = raised_node;
     } else if (pivot_node == pivot_node->parent->right) {
       pivot_node->parent->right = raised_node;
@@ -339,6 +346,7 @@ class RBTree {
         BaseNode* uncle_node = node_to_fix->parent->parent->right;
 
         if (is_red(uncle_node)) {
+          // Case 1: uncle is red.
           node_to_fix->parent->color = Color::Black;
           uncle_node->color = Color::Black;
           node_to_fix->parent->parent->color = Color::Red;
@@ -346,16 +354,19 @@ class RBTree {
           node_to_fix = node_to_fix->parent->parent;
         } else {
           if (node_to_fix == node_to_fix->parent->right) {
+            // Case 2: inner child.
             node_to_fix = node_to_fix->parent;
             left_rotate(node_to_fix);
           }
 
+          // Case 3: outer child.
           node_to_fix->parent->color = Color::Black;
           node_to_fix->parent->parent->color = Color::Red;
 
           right_rotate(node_to_fix->parent->parent);
         }
       } else {
+        // Symmetric cases.
         BaseNode* uncle_node = node_to_fix->parent->parent->left;
 
         if (is_red(uncle_node)) {
@@ -382,7 +393,7 @@ class RBTree {
   }
 
   void transplant(BaseNode* old_node, BaseNode* new_node) {
-    if (old_node->parent == nil_) {
+    if (old_node->parent == &nil_) {
       root_ = new_node;
     } else if (old_node == old_node->parent->left) {
       old_node->parent->left = new_node;
@@ -394,17 +405,17 @@ class RBTree {
   }
 
   BaseNode* minimum(BaseNode* subtree_root) const {
-    while (subtree_root->left != nil_) {
+    while (subtree_root->left != &nil_) {
       subtree_root = subtree_root->left;
     }
 
     return subtree_root;
   }
 
-  BaseNode* find_node(const Key& key) const {
+  BaseNode* find_node(const Key& key) {
     BaseNode* current_node = root_;
 
-    while (current_node != nil_) {
+    while (current_node != &nil_) {
       Node* data_node = as_node(current_node);
 
       if (key < data_node->key) {
@@ -416,7 +427,25 @@ class RBTree {
       }
     }
 
-    return nil_;
+    return &nil_;
+  }
+
+  const BaseNode* find_node(const Key& key) const {
+    const BaseNode* current_node = root_;
+
+    while (current_node != &nil_) {
+      const Node* data_node = as_node(current_node);
+
+      if (key < data_node->key) {
+        current_node = current_node->left;
+      } else if (data_node->key < key) {
+        current_node = current_node->right;
+      } else {
+        return current_node;
+      }
+    }
+
+    return &nil_;
   }
 
   void delete_fixup(BaseNode* node_to_fix) {
@@ -424,12 +453,13 @@ class RBTree {
       if (node_to_fix == node_to_fix->parent->left) {
         BaseNode* sibling_node = node_to_fix->parent->right;
 
-        if (sibling_node == nil_) {
+        if (sibling_node == &nil_) {
           node_to_fix = node_to_fix->parent;
           continue;
         }
 
         if (is_red(sibling_node)) {
+          // Case 1: sibling is red.
           sibling_node->color = Color::Black;
           node_to_fix->parent->color = Color::Red;
 
@@ -439,10 +469,12 @@ class RBTree {
         }
 
         if (is_black(sibling_node->left) && is_black(sibling_node->right)) {
+          // Case 2: both sibling children are black.
           sibling_node->color = Color::Red;
           node_to_fix = node_to_fix->parent;
         } else {
           if (is_black(sibling_node->right)) {
+            // Case 3: far child is black.
             sibling_node->left->color = Color::Black;
             sibling_node->color = Color::Red;
 
@@ -451,6 +483,7 @@ class RBTree {
             sibling_node = node_to_fix->parent->right;
           }
 
+          // Case 4: far child is red.
           sibling_node->color = node_to_fix->parent->color;
           node_to_fix->parent->color = Color::Black;
           sibling_node->right->color = Color::Black;
@@ -460,9 +493,10 @@ class RBTree {
           node_to_fix = root_;
         }
       } else {
+        // Symmetric cases.
         BaseNode* sibling_node = node_to_fix->parent->left;
 
-        if (sibling_node == nil_) {
+        if (sibling_node == &nil_) {
           node_to_fix = node_to_fix->parent;
           continue;
         }
@@ -477,10 +511,12 @@ class RBTree {
         }
 
         if (is_black(sibling_node->right) && is_black(sibling_node->left)) {
+          // Case 2: both sibling children are black.
           sibling_node->color = Color::Red;
           node_to_fix = node_to_fix->parent;
         } else {
           if (is_black(sibling_node->left)) {
+            // Case 3: far child is black.
             sibling_node->right->color = Color::Black;
             sibling_node->color = Color::Red;
 
@@ -489,6 +525,7 @@ class RBTree {
             sibling_node = node_to_fix->parent->left;
           }
 
+          // Case 4: far child is red.
           sibling_node->color = node_to_fix->parent->color;
           node_to_fix->parent->color = Color::Black;
           sibling_node->left->color = Color::Black;
@@ -504,7 +541,7 @@ class RBTree {
   }
 
   void destroy(BaseNode* base_node) {
-    if (base_node == nil_) {
+    if (base_node == &nil_) {
       return;
     }
 
@@ -513,7 +550,4 @@ class RBTree {
 
     delete as_node(base_node);
   }
-
-  BaseNode* nil_;
-  BaseNode* root_;
 };
