@@ -4,6 +4,8 @@
 #include <optional>
 #include <stack>
 
+namespace search_trees {
+
 template <typename Key>
 class RBTree {
  public:
@@ -187,8 +189,8 @@ class RBTree {
   };
 
   struct Node : BaseNode {
-    Node(const Key& key, BaseNode* nil)
-        : BaseNode(nil, Color::Red, 1), key(key), key_count(1) {}
+    Node(const Key& node_key, BaseNode* nil)
+        : BaseNode(nil, Color::Red, 1), key(node_key), key_count(1) {}
 
     Key key;
     std::size_t key_count;
@@ -578,3 +580,5 @@ class RBTree {
     }
   }
 };
+
+}  // namespace search_trees
