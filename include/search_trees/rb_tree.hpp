@@ -20,21 +20,11 @@ class RBTree {
 
   void insert(const Key& key) {
     BaseNode* parent_node = &nil_;
-    BaseNode* current_node = root_;
+    BaseNode* found_node =
+        descend_from_root(InsertVisitor{*this, parent_node, key});
 
-    while (current_node != &nil_) {
-      parent_node = current_node;
-      Node* data_node = node_cast(current_node);
-
-      if (key < data_node->key) {
-        current_node = current_node->left;
-      } else if (data_node->key < key) {
-        current_node = current_node->right;
-      } else {
-        ++data_node->key_count;
-        update_ancestors(current_node);
-        return;
-      }
+    if (found_node != &nil_) {
+      return;
     }
 
     Node* new_node = new Node(key, &nil_);
@@ -53,7 +43,7 @@ class RBTree {
   }
 
   bool erase(const Key& key) {
-    BaseNode* target_node = find_node(key);
+    BaseNode* target_node = descend_from_root(FindVisitor{key});
 
     if (target_node == &nil_) {
       return false;
@@ -71,53 +61,32 @@ class RBTree {
   }
 
   std::optional<Key> lower_bound(const Key& key) const {
-    const BaseNode* current_node = root_;
-    const BaseNode* answer_node = &nil_;
+    const BaseNode* result_node = &nil_;
+    descend_from_root(LowerBoundVisitor{key, result_node});
 
-    while (current_node != &nil_) {
-      const Node* data_node = node_cast(current_node);
-
-      if (!(data_node->key < key)) {
-        answer_node = current_node;
-        current_node = current_node->left;
-      } else {
-        current_node = current_node->right;
-      }
-    }
-
-    if (answer_node == &nil_) {
+    if (result_node == &nil_) {
       return std::nullopt;
     }
 
-    return node_cast(answer_node)->key;
+    return node_cast(result_node)->key;
   }
 
-  std::optional<Key> kth_smallest(std::size_t order) const {
-    if (order == 0 || order > size()) {
+  std::optional<Key> kth_smallest(std::size_t index) const {
+    if (index == 0 || index > size()) {
       return std::nullopt;
     }
 
-    const BaseNode* current_node = root_;
+    const BaseNode* result_node = descend_from_root(KthSmallestVisitor{index});
 
-    while (current_node != &nil_) {
-      const std::size_t left_size = current_node->left->subtree_size;
-      const std::size_t key_count = node_cast(current_node)->key_count;
-
-      if (order <= left_size) {
-        current_node = current_node->left;
-      } else if (order <= left_size + key_count) {
-        return node_cast(current_node)->key;
-      } else {
-        order -= left_size + key_count;
-        current_node = current_node->right;
-      }
+    if (result_node == &nil_) {
+      return std::nullopt;
     }
 
-    return std::nullopt;
+    return node_cast(result_node)->key;
   }
 
   std::size_t count(const Key& key) const {
-    const BaseNode* found_node = find_node(key);
+    const BaseNode* found_node = descend_from_root(FindVisitor{key});
 
     if (found_node == &nil_) {
       return 0;
@@ -128,20 +97,7 @@ class RBTree {
 
   std::size_t count_less_than(const Key& key) const {
     std::size_t key_counter = 0;
-    const BaseNode* current_node = root_;
-
-    while (current_node != &nil_) {
-      const Node* data_node = node_cast(current_node);
-
-      if (data_node->key < key) {
-        key_counter += current_node->left->subtree_size;
-        key_counter += data_node->key_count;
-        current_node = current_node->right;
-      } else {
-        current_node = current_node->left;
-      }
-    }
-
+    descend_from_root(CountLessVisitor{key, key_counter});
     return key_counter;
   }
 
@@ -164,6 +120,12 @@ class RBTree {
   enum class Color {
     Red = 0,
     Black = 1
+  };
+
+  enum class TraversalDirection {
+    Left = 0,
+    Right = 1,
+    Stop = 2
   };
 
   struct BaseNode {
@@ -194,6 +156,93 @@ class RBTree {
 
     Key key;
     std::size_t key_count;
+  };
+
+  struct FindVisitor {
+    const Key& key;
+
+    TraversalDirection operator()(const Node* node) const {
+      if (key < node->key) {
+        return TraversalDirection::Left;
+      }
+
+      if (node->key < key) {
+        return TraversalDirection::Right;
+      }
+
+      return TraversalDirection::Stop;
+    }
+  };
+
+  struct InsertVisitor {
+    RBTree& tree;
+    BaseNode*& parent;
+    const Key& key;
+
+    TraversalDirection operator()(Node* node) const {
+      parent = node;
+
+      if (key < node->key) {
+        return TraversalDirection::Left;
+      }
+
+      if (node->key < key) {
+        return TraversalDirection::Right;
+      }
+
+      ++node->key_count;
+      tree.update_ancestors(node);
+
+      return TraversalDirection::Stop;
+    }
+  };
+
+  struct LowerBoundVisitor {
+    const Key& key;
+    const BaseNode*& result_node;
+
+    TraversalDirection operator()(const Node* node) const {
+      if (!(node->key < key)) {
+        result_node = node;
+        return TraversalDirection::Left;
+      }
+
+      return TraversalDirection::Right;
+    }
+  };
+
+  struct KthSmallestVisitor {
+    std::size_t& index;
+
+    TraversalDirection operator()(const Node* node) const {
+      const std::size_t left_size = node->left->subtree_size;
+
+      if (index <= left_size) {
+        return TraversalDirection::Left;
+      }
+
+      if (index <= left_size + node->key_count) {
+        return TraversalDirection::Stop;
+      }
+
+      index -= left_size + node->key_count;
+      return TraversalDirection::Right;
+    }
+  };
+
+  struct CountLessVisitor {
+    const Key& key;
+    std::size_t& key_counter;
+
+    TraversalDirection operator()(const Node* node) const {
+      if (node->key < key) {
+        key_counter += node->left->subtree_size;
+        key_counter += node->key_count;
+        return TraversalDirection::Right;
+      }
+
+      return TraversalDirection::Left;
+    }
   };
 
   BaseNode nil_;
@@ -230,6 +279,43 @@ class RBTree {
       update_subtree_size(base_node);
       base_node = base_node->parent;
     }
+  }
+
+  template <typename Visitor>
+  BaseNode* descend_from_root(Visitor visit) {
+    BaseNode* current_node = root_;
+
+    while (current_node != &nil_) {
+      TraversalDirection direction = visit(node_cast(current_node));
+      if (direction == TraversalDirection::Stop) {
+        return current_node;
+      }
+
+      current_node = (direction == TraversalDirection::Left) ?
+                         current_node->left :
+                         current_node->right;
+    }
+
+    return &nil_;
+  }
+
+  template <typename Visitor>
+  const BaseNode* descend_from_root(Visitor visit) const {
+    const BaseNode* nil_node = &nil_;
+    const BaseNode* current_node = root_;
+
+    while (current_node != nil_node) {
+      const TraversalDirection direction = visit(node_cast(current_node));
+      if (direction == TraversalDirection::Stop) {
+        return current_node;
+      }
+
+      current_node = (direction == TraversalDirection::Left) ?
+                         current_node->left :
+                         current_node->right;
+    }
+
+    return nil_node;
   }
 
   void left_rotate(BaseNode* pivot_node) {
@@ -370,43 +456,6 @@ class RBTree {
     }
 
     return subtree_root;
-  }
-
-  // Finds a node by key. Returns the sentinel when the key is absent.
-  BaseNode* find_node(const Key& key) {
-    BaseNode* current_node = root_;
-
-    while (current_node != &nil_) {
-      Node* data_node = node_cast(current_node);
-
-      if (key < data_node->key) {
-        current_node = current_node->left;
-      } else if (data_node->key < key) {
-        current_node = current_node->right;
-      } else {
-        return current_node;
-      }
-    }
-
-    return &nil_;
-  }
-
-  const BaseNode* find_node(const Key& key) const {
-    const BaseNode* current_node = root_;
-
-    while (current_node != &nil_) {
-      const Node* data_node = node_cast(current_node);
-
-      if (key < data_node->key) {
-        current_node = current_node->left;
-      } else if (data_node->key < key) {
-        current_node = current_node->right;
-      } else {
-        return current_node;
-      }
-    }
-
-    return &nil_;
   }
 
   // Deletes a node that contains exactly one occurrence of its key.
