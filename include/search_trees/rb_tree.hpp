@@ -4,6 +4,14 @@
 #include <optional>
 #include <stack>
 
+#ifndef NDEBUG
+#include <fstream>
+#include <ostream>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+#endif // !NDEBUG
+
 namespace search_trees {
 
 template <typename Key>
@@ -115,6 +123,17 @@ class RBTree {
     nil_.color = Color::Black;
     nil_.subtree_size = 0;
   }
+
+#ifndef NDEBUG
+  // Debug-only API. Definitions and implementation details are kept private.
+  bool debug_dump(const char* filename) const {
+    return debug_dump_impl(filename);
+  }
+
+  bool verify_invariants(std::string* error_message = nullptr) const {
+    return verify_invariants_impl(error_message);
+  }
+#endif // !NDEBUG
 
  private:
   enum class Color {
@@ -628,6 +647,298 @@ class RBTree {
       delete node_cast(current_node);
     }
   }
+
+  // debug ---------------------------------------------------------------------
+
+#ifndef NDEBUG
+  struct VerificationResult {
+    bool valid;
+    std::size_t computed_size;
+    std::size_t black_height;
+  };
+
+  bool debug_dump_impl(const char* filename) const {
+    if (filename == nullptr) {
+      return false;
+    }
+
+    std::ofstream output_file(filename);
+    if (!output_file.is_open()) {
+      return false;
+    }
+
+    output_file << "digraph Tree {\n";
+    output_file << "\trankdir=TB;\n";
+    output_file << "\tnode [shape=record, style=filled];\n";
+    output_file << "\tedge [fontsize=10, color=black];\n\n";
+
+    if (root_ != &nil_) {
+      std::stack<const BaseNode*> pending_nodes;
+      std::unordered_set<const BaseNode*> emitted_nodes;
+      pending_nodes.push(root_);
+
+      while (!pending_nodes.empty()) {
+        const BaseNode* current_node = pending_nodes.top();
+        pending_nodes.pop();
+
+        if (current_node == &nil_
+            || !emitted_nodes.insert(current_node).second) {
+          continue;
+        }
+
+        const Node* data_node = node_cast(current_node);
+        const std::string current_address = pointer_to_string(current_node);
+        const std::string current_identifier =
+            dot_node_identifier(current_node);
+
+        std::ostringstream key_stream;
+        key_stream << data_node->key;
+        const std::string key_text = key_stream.str();
+
+        const bool red_node = current_node->color == Color::Red;
+        const char* fill_color = red_node ? "#F28B82" : "#303030";
+        const char* font_color = red_node ? "black" : "white";
+        const char* color_text = red_node ? "RED" : "BLACK";
+
+        output_file << "\t" << current_identifier << " [label=\"{{{<f0> ";
+        write_dot_escaped(output_file, current_address);
+        output_file << " | <f1> type = RB_NODE | <f2> key = ";
+        write_dot_escaped(output_file, key_text);
+        output_file << " | <f3> color = " << color_text
+                    << " | <f4> key_count = " << data_node->key_count
+                    << " | <f5> subtree_size = " << current_node->subtree_size
+                    << "}} | {<f6> left: ";
+
+        if (current_node->left == &nil_) {
+          output_file << "(nil)";
+        } else {
+          write_dot_escaped(output_file, pointer_to_string(current_node->left));
+        }
+
+        output_file << " | <f7> right: ";
+
+        if (current_node->right == &nil_) {
+          output_file << "(nil)";
+        } else {
+          write_dot_escaped(output_file,
+                            pointer_to_string(current_node->right));
+        }
+
+        output_file << "}}\", fillcolor=\"" << fill_color << "\", fontcolor=\""
+                    << font_color << "\"];\n";
+
+        if (current_node->left != &nil_) {
+          write_dot_edge(output_file, current_node, current_node->left, "f6",
+                         "red");
+          pending_nodes.push(current_node->left);
+        }
+
+        if (current_node->right != &nil_) {
+          write_dot_edge(output_file, current_node, current_node->right, "f7",
+                         "green");
+          pending_nodes.push(current_node->right);
+        }
+      }
+    }
+
+    output_file << "}\n";
+    return output_file.good();
+  }
+
+  bool verify_invariants_impl(std::string* error_message) const {
+    if (error_message != nullptr) {
+      error_message->clear();
+    }
+
+    if (nil_.left != &nil_ || nil_.right != &nil_) {
+      return set_verification_error(
+          error_message, "NIL left/right pointers must refer to NIL");
+    }
+    if (nil_.color != Color::Black) {
+      return set_verification_error(error_message, "NIL must be black");
+    }
+    if (nil_.subtree_size != 0) {
+      return set_verification_error(error_message,
+                                    "NIL subtree_size must be zero");
+    }
+    if (root_ == nullptr) {
+      return set_verification_error(error_message, "root pointer is null");
+    }
+    if (root_ == &nil_) {
+      return true;
+    }
+    if (root_->parent != &nil_) {
+      return set_verification_error(error_message, "root parent must be NIL");
+    }
+    if (root_->color != Color::Black) {
+      return set_verification_error(error_message, "root must be black");
+    }
+
+    std::unordered_set<const BaseNode*> visited_nodes;
+    const VerificationResult result = verify_subtree(
+        root_, &nil_, nullptr, nullptr, visited_nodes, error_message);
+    return result.valid;
+  }
+
+  static bool set_verification_error(std::string* error_message,
+                                     const char* message) {
+    if (error_message != nullptr) {
+      *error_message = message;
+    }
+    return false;
+  }
+
+  VerificationResult verification_failure(std::string* error_message,
+                                          const char* message) const {
+    set_verification_error(error_message, message);
+    return {false, 0, 0};
+  }
+
+  VerificationResult verify_subtree(
+      const BaseNode* subtree_root, const BaseNode* expected_parent,
+      const Key* lower_bound, const Key* upper_bound,
+      std::unordered_set<const BaseNode*>& visited_nodes,
+      std::string* error_message) const {
+    if (subtree_root == nullptr) {
+      return verification_failure(error_message,
+                                  "a child pointer is null instead of NIL");
+    }
+
+    // NIL contributes no elements and one black node to black height.
+    if (subtree_root == &nil_) {
+      return {true, 0, 1};
+    }
+
+    if (!visited_nodes.insert(subtree_root).second) {
+      return verification_failure(
+          error_message,
+          "a node is reachable more than once (cycle/shared child)");
+    }
+
+    if (subtree_root->parent != expected_parent) {
+      return verification_failure(error_message,
+                                  "a node has an incorrect parent pointer");
+    }
+
+    if (subtree_root->color != Color::Red
+        && subtree_root->color != Color::Black) {
+      return verification_failure(error_message, "a node has an invalid color");
+    }
+
+    const Node* current_data = node_cast(subtree_root);
+    if (current_data->key_count == 0) {
+      return verification_failure(error_message,
+                                  "key_count must be greater than zero");
+    }
+
+    if (lower_bound != nullptr && !(*lower_bound < current_data->key)) {
+      return verification_failure(error_message,
+                                  "BST lower-bound ordering is violated");
+    }
+    if (upper_bound != nullptr && !(current_data->key < *upper_bound)) {
+      return verification_failure(error_message,
+                                  "BST upper-bound ordering is violated");
+    }
+
+    if (is_red(subtree_root)
+        && (is_red(subtree_root->left) || is_red(subtree_root->right))) {
+      return verification_failure(error_message, "a red node has a red child");
+    }
+
+    const VerificationResult left_result =
+        verify_subtree(subtree_root->left, subtree_root, lower_bound,
+                       &current_data->key, visited_nodes, error_message);
+    if (!left_result.valid) {
+      return left_result;
+    }
+
+    const VerificationResult right_result =
+        verify_subtree(subtree_root->right, subtree_root, &current_data->key,
+                       upper_bound, visited_nodes, error_message);
+    if (!right_result.valid) {
+      return right_result;
+    }
+
+    if (left_result.black_height != right_result.black_height) {
+      return verification_failure(error_message,
+                                  "left and right black heights differ");
+    }
+
+    const std::size_t calculated_size = left_result.computed_size
+                                        + right_result.computed_size
+                                        + current_data->key_count;
+    if (subtree_root->subtree_size != calculated_size) {
+      return verification_failure(
+          error_message,
+          "subtree_size does not match child sizes and key_count");
+    }
+
+    const std::size_t calculated_black_height =
+        left_result.black_height
+        + (subtree_root->color == Color::Black ? 1 : 0);
+
+    return {true, calculated_size, calculated_black_height};
+  }
+
+  static std::string pointer_to_string(const BaseNode* node) {
+    std::ostringstream address_stream;
+    address_stream << static_cast<const void*>(node);
+    return address_stream.str();
+  }
+
+  static std::string dot_node_identifier(const BaseNode* node) {
+    return "node_" + pointer_to_string(node);
+  }
+
+  static void write_dot_escaped(std::ostream& output, const std::string& text) {
+    for (char character : text) {
+      switch (character) {
+        case '\\':
+          output << "\\\\";
+          break;
+        case '"':
+          output << "\\\"";
+          break;
+        case '|':
+          output << "\\|";
+          break;
+        case '{':
+          output << "\\{";
+          break;
+        case '}':
+          output << "\\}";
+          break;
+        case '<':
+          output << "\\<";
+          break;
+        case '>':
+          output << "\\>";
+          break;
+        case '\n':
+          output << "\\n";
+          break;
+        case '\r':
+          output << "\\r";
+          break;
+        default:
+          output << character;
+          break;
+      }
+    }
+  }
+
+  static void write_dot_edge(std::ostream& output, const BaseNode* parent_node,
+                             const BaseNode* child_node, const char* port_name,
+                             const char* edge_color) {
+    const std::string parent_id = dot_node_identifier(parent_node);
+    const std::string child_id = dot_node_identifier(child_node);
+
+    output << "\t" << parent_id << ':' << port_name << " -> " << child_id
+           << " [color=" << edge_color << ", arrowhead=normal];\n";
+    output << "\t" << child_id << " -> " << parent_id << ':' << port_name
+           << " [color=" << edge_color << ", arrowhead=normal];\n";
+  }
+#endif  // !NDEBUG
 };
 
 }  // namespace search_trees
